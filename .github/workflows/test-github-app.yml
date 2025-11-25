@@ -1,19 +1,52 @@
-name: Test GitHub App
+name: Test GitHub App token + checkout
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: 'Repo objetivo (org/repo) para probar checkout'
+        required: true
+        default: '<tu-usuario>/<tu-repo-de-prueba>'
+      version_type:
+        description: 'patch | minor | major'
+        required: false
+        default: 'patch'
 
 jobs:
-  test:
+  test-app-token:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write   # permiso mínimo para git push si luego lo activas
     steps:
-      - name: Generate token
-        id: token
+      - name: Generate GitHub App token
+        id: app_token
         uses: tibdex/github-app-token@v2
         with:
           app_id: ${{ secrets.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Validate
+      - name: Show token prefix (debug only)
         run: |
-          echo "Token generated OK"
+          echo "Token length: ${{ steps.app_token.outputs.token }}" >/dev/null || true
+          # NOT printing full token for security; just confirm there's output
+          if [ -z "${{ steps.app_token.outputs.token }}" ]; then
+            echo "No token returned" && exit 1
+          fi
+          echo "Token appears generated."
+
+      - name: Checkout target repo using App token
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.target_repo }}
+          token: ${{ steps.app_token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Show current repo info (sanity)
+        run: |
+          echo "Checked out repository:"
+          git remote -v
+          echo "Current branch: $(git rev-parse --abbrev-ref HEAD || echo none)"
+          ls -la
+
+      - name: Run prepare_release_test script
+        run: bash ./scripts/prepare_release_test.sh "${{ github.event.inputs.version_type }}"
