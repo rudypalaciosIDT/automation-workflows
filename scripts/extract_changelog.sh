@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euox pipefail
 
 jira_linkify() {
     while IFS= read -r line; do
@@ -22,7 +22,9 @@ extract_and_append_changelog() {
 
     git remote -v
     git branch
+    git tag
     git log
+    git log HEAD^1..HEAD
 
     echo "# Changelog" > "$TEMP_FILE"
     echo "## $VERSION" >> "$TEMP_FILE"
