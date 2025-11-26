@@ -173,7 +173,7 @@ promote_release() {
         --arg name "$release_version" \
         --arg target "$MAIN_BRANCH" \
         --arg notes "$(cat "$NOTES_FILE")" \
-        '{tag_name: $tag, name: $name, target_commitish: $target, body: $notes, draft: true, prerelease: true}')"
+        '{tag_name: $tag, name: $name, target_commitish: $target, body: $notes, prerelease: true}')"
 
     log_success "GitHub Release created."
   fi
