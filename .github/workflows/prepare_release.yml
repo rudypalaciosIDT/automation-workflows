@@ -1,0 +1,117 @@
+name: 1. Release Cut (Remote Repo)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "Target repo (format: owner/name)"
+        required: true
+        type: string
+
+      version_type:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+      develop_branch:
+        description: "QA branch"
+        required: true
+        default: "nextrelease_qa"
+        type: string
+
+jobs:
+  prepare_release:
+    runs-on: ubuntu-latest
+
+    env:
+      TEMPORARY_RELEASE_BRANCH: release/candidate
+
+    steps:
+      - name: Generate GitHub App Token
+        id: app_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Verify Repository Access
+        id: verify
+        env:
+          TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          echo "Checking access to repository: ${{ github.event.inputs.repo_url }}"
+
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.event.inputs.repo_url }})
+
+          if [[ "$STATUS" != "200" ]]; then
+            echo "[ERROR] GitHub App can't access the target repository. HTTP STATUS: $STATUS"
+            exit 1
+          fi
+
+          echo "[OK] Access to repository verified. HTTP STATUS: $STATUS"
+
+      - name: Get repository code (external repo)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo_url }}
+          token: ${{ steps.app_token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Configure GIT identity
+        run: |
+          git config --global user.name "Automation Bot"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Check working directory is clean
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "[ERROR] Working directory not clean. Commit or stash changes first."
+            exit 1
+          fi
+
+      - name: Update develop branch
+        env:
+          DEVELOP_BRANCH: ${{ github.event.inputs.develop_branch }}
+        run: |
+          git fetch origin "$DEVELOP_BRANCH"
+          git checkout "$DEVELOP_BRANCH"
+          git pull origin "$DEVELOP_BRANCH"
+
+      - name: Delete temporary release branch if exists
+        run: |
+          if git rev-parse --verify "$TEMPORARY_RELEASE_BRANCH" >/dev/null 2>&1; then
+            echo "[WARN] Branch exists, deleting..."
+            git branch -D "$TEMPORARY_RELEASE_BRANCH"
+          fi
+
+      - name: Create temporary release branch
+        run: |
+          git checkout -b "$TEMPORARY_RELEASE_BRANCH"
+
+      - name: Install Node (for npm version)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump version to next RC
+        id: bump
+        env:
+          VERSION_TYPE: ${{ github.event.inputs.version_type }}
+        run: |
+          rc_version=$(npm version pre${VERSION_TYPE} --preid=rc)
+          echo "rc_version=$rc_version" >> $GITHUB_OUTPUT
+
+      - name: Push branch and tags
+        run: |
+          git push origin "$TEMPORARY_RELEASE_BRANCH" --follow-tags
+
+      - name: Success message
+        run: echo "[OK] Release Candidate ${{ steps.bump.outputs.rc_version }} created and pushed!"

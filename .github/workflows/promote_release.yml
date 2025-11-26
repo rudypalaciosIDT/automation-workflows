@@ -1,32 +1,36 @@
-name: Promote Release
+name: 2. Promote Release (Remote Repo)
 
 on:
   workflow_dispatch:
     inputs:
       repo_url:
-        description: "owner/repo"
+        description: "Target repo (format: owner/name)"
         required: true
         type: string
+
       main_branch:
-        description: "Main branch"
+        description: "Production branch"
         default: "master"
+        required: true
         type: string
+
       release_branch:
-        description: "Release branch"
+        description: "Staging branch"
         default: "nextrelease"
+        required: true
         type: string
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   promote:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
-      pull-requests: write
-
     steps:
-      - name: Generate GitHub App token
-        id: app-token
+      - name: Generate GitHub App Token
+        id: app_token
         uses: tibdex/github-app-token@v2
         with:
           app_id: ${{ secrets.APP_ID }}
@@ -36,22 +40,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo_url }}
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app_token.outputs.token }}
           fetch-depth: 0
+          path: target_repo
 
       - name: Fetch tags
-        run: git fetch --tags --force
+        working-directory: target_repo
+        run: |
+          git fetch --tags --force
+          git tag
 
       - name: Checkout automation repo scripts
         uses: actions/checkout@v4
         with:
           path: automation
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app_token.outputs.token }}
 
-      - name: Configure git identity
+      - name: Configure GIT identity
         run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "Automation Bot"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Install Node (for npm version)
         uses: actions/setup-node@v4
@@ -59,12 +67,13 @@ jobs:
           node-version: 20
 
       - name: Run promote release
+        working-directory: target_repo
         env:
           REPO_URL: ${{ inputs.repo_url }}
           MAIN_BRANCH: ${{ inputs.main_branch }}
           RELEASE_BRANCH: ${{ inputs.release_branch }}
           TEMPORARY_RELEASE_BRANCH: "release/candidate"
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
-          chmod +x automation/scripts/promote_release.sh
-          automation/scripts/promote_release.sh
+          chmod +x ../automation/scripts/promote_release.sh
+          ../automation/scripts/promote_release.sh
