@@ -32,11 +32,11 @@ jobs:
       # Create GitHub App Token
       # ---------------------------------------------------------
       - name: Generate GitHub App Token
-        id: app-token
-        uses: actions/create-github-app-token@v1
+        id: app_token
+        uses: tibdex/github-app-token@v2
         with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
 
       # ---------------------------------------------------------
       # Validate access to target repo
@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.inputs.repo_url }}
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app_token.outputs.token }}
           fetch-depth: 0
           path: repo
 
@@ -96,7 +96,7 @@ jobs:
       - name: Deploy release
         working-directory: repo
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
           RELEASE_VERSION: ${{ steps.detect.outputs.version }}
           MAIN_BRANCH: ${{ github.event.inputs.main_branch }}
           RELEASE_BRANCH: ${{ github.event.inputs.release_branch }}
