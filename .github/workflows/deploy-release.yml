@@ -80,26 +80,12 @@ jobs:
         run: git fetch --tags --force
 
       # ---------------------------------------------------------
-      # Detect latest version tag
-      # ---------------------------------------------------------
-      - name: Detect version
-        id: detect
-        working-directory: repo
-        run: |
-          git branch
-          git log
-          version=$(git describe --tags --abbrev=0)
-          echo "Found version: $version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      # ---------------------------------------------------------
       # Deploy release (embedded shell script)
       # ---------------------------------------------------------
       - name: Deploy release
         working-directory: repo
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          RELEASE_VERSION: ${{ steps.detect.outputs.version }}
           MAIN_BRANCH: ${{ github.event.inputs.main_branch }}
           RELEASE_BRANCH: ${{ github.event.inputs.release_branch }}
           DEVELOP_BRANCH: ${{ github.event.inputs.develop_branch }}
@@ -107,6 +93,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          git checkout "${RELEASE_BRANCH}"
+          RELEASE_VERSION=$(git describe --tags --abbrev=0)
+          echo "Found version: $version"
+          
           echo "Merging $RELEASE_BRANCH → $MAIN_BRANCH"
           git checkout "$MAIN_BRANCH"
           git pull origin "$MAIN_BRANCH"
