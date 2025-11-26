@@ -8,15 +8,12 @@ on:
         required: true
       main_branch:
         description: "Branch de producción"
-        required: false
         default: "master"
       release_branch:
         description: "Branch de staging/release"
-        required: false
         default: "nextrelease"
       develop_branch:
-        description: "Branch de QA"
-        required: false
+        description: "Branch QA"
         default: "nextrelease_qa"
 
 permissions:
@@ -28,9 +25,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------------------------------------------------------
-      # Create GitHub App Token
-      # ---------------------------------------------------------
       - name: Generate GitHub App Token
         id: app_token
         uses: tibdex/github-app-token@v2
@@ -38,32 +32,6 @@ jobs:
           app_id: ${{ secrets.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      # ---------------------------------------------------------
-      # Validate access to target repo
-      # ---------------------------------------------------------
-      - name: Verify Repo Access
-        id: verify
-        env:
-          TOKEN: ${{ steps.app_token.outputs.token }}
-        run: |
-          echo "🔍 Verificando acceso al repo: ${{ github.event.inputs.repo_url }}"
-
-          STATUS=$(curl -o /dev/null -s -w "%{http_code}" \
-            -H "Authorization: token $TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.event.inputs.repo_url }})
-
-          if [[ "$STATUS" != "200" ]]; then
-            echo "❌ ERROR: La GitHub App no tiene permiso para acceder al repo."
-            echo "Status HTTP recibido: $STATUS"
-            exit 1
-          fi
-
-          echo "✅ Acceso confirmado al repo remoto."
-
-      # ---------------------------------------------------------
-      # Checkout target repo
-      # ---------------------------------------------------------
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
@@ -72,59 +40,99 @@ jobs:
           fetch-depth: 0
           path: repo
 
-      # ---------------------------------------------------------
-      # Fetch tags
-      # ---------------------------------------------------------
       - name: Fetch tags
         working-directory: repo
         run: git fetch --tags --force
 
-      # ---------------------------------------------------------
-      # Configure GH user identity
-      # ---------------------------------------------------------
       - name: Configure git identity
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "Automation Bot"
 
-      # ---------------------------------------------------------
-      # Deploy release (embedded shell script)
-      # ---------------------------------------------------------
       - name: Deploy release
         working-directory: repo
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          MAIN_BRANCH: ${{ github.event.inputs.main_branch }}
-          RELEASE_BRANCH: ${{ github.event.inputs.release_branch }}
-          DEVELOP_BRANCH: ${{ github.event.inputs.develop_branch }}
           REPO_URL: ${{ github.event.inputs.repo_url }}
+          MAIN: ${{ github.event.inputs.main_branch }}
+          RELEASE: ${{ github.event.inputs.release_branch }}
+          DEVELOP: ${{ github.event.inputs.develop_branch }}
         run: |
           set -euo pipefail
 
-          git checkout "${RELEASE_BRANCH}"
-          RELEASE_VERSION=$(git describe --tags --abbrev=0)
-          echo "Found version: $RELEASE_VERSION"
-          
-          echo "Merging $RELEASE_BRANCH → $MAIN_BRANCH"
-          git checkout "$MAIN_BRANCH"
-          git pull origin "$MAIN_BRANCH"
-          git merge --no-ff "$RELEASE_BRANCH" -m "Deploy $RELEASE_VERSION"
-          git push origin "$MAIN_BRANCH"
+          echo "Checking version from $RELEASE..."
+          git checkout "$RELEASE"
+          git pull origin "$RELEASE"
+          VERSION=$(git describe --tags --abbrev=0)
+          echo "VERSION=$VERSION"
 
-          echo "Merging $MAIN_BRANCH → $DEVELOP_BRANCH"
-          git checkout "$DEVELOP_BRANCH"
-          git pull origin "$DEVELOP_BRANCH"
-          git merge --no-ff "$MAIN_BRANCH" -m "Sync after deploy $RELEASE_VERSION"
-          git push origin "$DEVELOP_BRANCH"
+          # ---------------------------
+          # PR 1: release -> main
+          # ---------------------------
+          echo "Creating PR: $RELEASE → $MAIN"
 
-          echo "Publishing GitHub Release $RELEASE_VERSION"
+          PR1=$(curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO_URL/pulls \
+            -d "{
+              \"title\": \"Deploy $VERSION to $MAIN\",
+              \"base\": \"$MAIN\",
+              \"head\": \"$RELEASE\"
+            }" | jq -r .number)
+
+          if [[ "$PR1" == "null" ]]; then
+            echo "ERROR creating PR1"
+            exit 1
+          fi
+
+          echo "Auto-merging PR #$PR1..."
+          curl -s -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO_URL/pulls/$PR1/merge \
+            -d '{"merge_method":"merge"}'
+
+          # ---------------------------
+          # PR 2: main -> develop
+          # ---------------------------
+          git fetch
+          echo "Creating PR: $MAIN → $DEVELOP"
+
+          PR2=$(curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO_URL/pulls \
+            -d "{
+              \"title\": \"Sync post-deploy $VERSION\",
+              \"base\": \"$DEVELOP\",
+              \"head\": \"$MAIN\"
+            }" | jq -r .number)
+
+          if [[ "$PR2" == "null" ]]; then
+            echo "ERROR creating PR2"
+            exit 1
+          fi
+
+          echo "Auto-merging PR #$PR2..."
+          curl -s -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO_URL/pulls/$PR2/merge \
+            -d '{"merge_method":"merge"}'
+
+          # ---------------------------
+          # Publish Release
+          # ---------------------------
+          echo "Publishing GitHub Release $VERSION"
+
           curl -X PATCH \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/$REPO_URL/releases/tags/$RELEASE_VERSION \
-            -d '{"draft":false}'
+            https://api.github.com/repos/$REPO_URL/releases/tags/$VERSION \
+            -d '{"draft": false}'
 
-          echo "✔ Deployment complete."
+          echo "✔ Deployment complete for $VERSION"
 
       - name: Done
-        run: echo "🎉 Deploy pipeline finished successfully."
+        run: echo "🎉 Deploy finished successfully."
