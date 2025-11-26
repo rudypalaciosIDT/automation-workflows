@@ -1,0 +1,150 @@
+name: Release Cut (Remote Repo)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "URL del repositorio destino (formato org/repo)"
+        required: true
+        type: string
+      
+      version_type:
+        description: "Tipo de versión a generar"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+      develop_branch:
+        description: "Nombre del DEVELOP branch"
+        required: true
+        default: "nextrelease_qa"
+        type: string
+
+jobs:
+  prepare_release:
+    runs-on: ubuntu-latest
+
+    steps:
+      ###########################################################
+      # 1. Generar installation token de la GitHub App
+      ###########################################################
+      - name: Generate GitHub App Token
+        id: app_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GHAPP_ID }}
+          private_key: ${{ secrets.GHAPP_PRIVATE_KEY }}
+
+      ###########################################################
+      # 2. Verificar acceso al repo remoto vía API
+      ###########################################################
+      - name: Verify Repo Access
+        id: verify
+        env:
+          TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          echo "🔍 Verificando acceso al repo: ${{ github.event.inputs.repo_url }}"
+
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" \
+            -H "Authorization: token $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.event.inputs.repo_url }})
+
+          if [[ "$STATUS" != "200" ]]; then
+            echo "❌ ERROR: La GitHub App no tiene permiso para acceder al repo."
+            echo "Status HTTP recibido: $STATUS"
+            exit 1
+          fi
+
+          echo "✅ Acceso confirmado al repo remoto."
+
+      ###########################################################
+      # 3. Checkout del repo remoto usando la App
+      ###########################################################
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.repo_url }}
+          token: ${{ steps.app_token.outputs.token }}
+          fetch-depth: 0
+
+      ###########################################################
+      # 4. Validar que el working directory esté limpio
+      ###########################################################
+      - name: Check working directory is clean
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "❌ Working directory not clean. Commit or stash changes first."
+            exit 1
+          fi
+
+      ###########################################################
+      # 5. Actualizar rama de desarrollo
+      ###########################################################
+      - name: Update develop branch
+        env:
+          DEVELOP_BRANCH: ${{ github.event.inputs.develop_branch }}
+        run: |
+          git fetch origin "$DEVELOP_BRANCH"
+          git checkout "$DEVELOP_BRANCH"
+          git pull origin "$DEVELOP_BRANCH"
+
+      ###########################################################
+      # 6. Eliminar rama temporal si existe
+      ###########################################################
+      - name: Delete temporary release branch if exists
+        env:
+          TEMPORARY_RELEASE_BRANCH: rc-temp
+        run: |
+          if git rev-parse --verify "$TEMPORARY_RELEASE_BRANCH" >/dev/null 2>&1; then
+            echo "⚠️ Branch exists, deleting..."
+            git branch -D "$TEMPORARY_RELEASE_BRANCH"
+          fi
+
+      ###########################################################
+      # 7. Crear la rama de release candidate
+      ###########################################################
+      - name: Create temporary release branch
+        env:
+          TEMPORARY_RELEASE_BRANCH: rc-temp
+        run: |
+          git checkout -b "$TEMPORARY_RELEASE_BRANCH"
+
+      ###########################################################
+      # 8. Setup Node.js para ejecutar npm version
+      ###########################################################
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      ###########################################################
+      # 9. Bump versión RC
+      ###########################################################
+      - name: Bump version to next RC
+        id: bump
+        env:
+          VERSION_TYPE: ${{ github.event.inputs.version_type }}
+        run: |
+          rc_version=$(npm version pre${VERSION_TYPE} --preid=rc)
+          echo "rc_version=$rc_version" >> $GITHUB_OUTPUT
+
+      ###########################################################
+      # 10. Push de la rama + tags
+      ###########################################################
+      - name: Push branch and tags
+        env:
+          TEMPORARY_RELEASE_BRANCH: rc-temp
+          TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          git push https://x-access-token:${TOKEN}@github.com/${{ github.event.inputs.repo_url }} "$TEMPORARY_RELEASE_BRANCH" --follow-tags
+
+      ###########################################################
+      # 11. Mensaje de éxito
+      ###########################################################
+      - name: Success message
+        run: echo "🎉 Release Candidate ${{ steps.bump.outputs.rc_version }} created and pushed!"
