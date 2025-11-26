@@ -150,20 +150,20 @@ promote_release() {
     log_info "Creating GitHub Release $release_version"
 
     # Confirm that the tag exists on GitHub before creating the release
-    echo "Waiting GitHub to register tag $release_version..."
+    echo "Waiting for GitHub to index tag $release_version..."
     
-    for i in {1..10}; do
-      STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    for i in {1..20}; do
+      TAG=$(curl -s \
         -H "Authorization: Bearer $GITHUB_TOKEN" \
         -H "Accept: application/vnd.github+json" \
-        https://api.github.com/repos/$REPO_URL/git/ref/tags/$release_version)
+        "https://api.github.com/repos/$REPO_URL/tags" | jq -r ".[].name" | grep -Fx "$release_version" || true)
     
-      if [[ "$STATUS" == "200" ]]; then
-        echo "Tag detected on GitHub ✔"
+      if [[ "$TAG" == "$release_version" ]]; then
+        echo "Tag is fully indexed ✔"
         break
       fi
     
-      echo "Tag not visible yet... retry $i/10"
+      echo "Tag not indexed yet... retry $i/20"
       sleep 4
     done
 
