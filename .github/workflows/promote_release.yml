@@ -69,6 +69,7 @@ jobs:
       - name: Run promote release
         working-directory: target_repo
         env:
+          JIRA_URL: ${{ secrets.JIRA_URL }}
           REPO_URL: ${{ inputs.repo_url }}
           MAIN_BRANCH: ${{ inputs.main_branch }}
           RELEASE_BRANCH: ${{ inputs.release_branch }}
