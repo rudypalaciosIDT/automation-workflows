@@ -1,0 +1,154 @@
+name: 3. Deployed Release (Remote Repo)
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "Target repo (format: owner/name)"
+        required: true
+        type: string
+
+      main_branch:
+        description: "Production branch"
+        default: "master"
+        required: true
+        type: string
+
+      release_branch:
+        description: "Staging branch"
+        default: "nextrelease"
+        required: true
+        type: string
+
+      develop_branch:
+        description: "QA branch"
+        default: "nextrelease_qa"
+        required: true
+        type: string
+
+env:
+  MAIN_BRANCH: ${{ github.event.inputs.main_branch }}
+  RELEASE_BRANCH: ${{ github.event.inputs.release_branch }}
+  DEVELOP_BRANCH: ${{ github.event.inputs.develop_branch }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate GitHub App Token
+        id: app_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Get repository code (external repo)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo_url }}
+          token: ${{ steps.app_token.outputs.token }}
+          fetch-depth: 0
+          path: target_repo
+
+      - name: Fetch tags
+        working-directory: target_repo
+        run: git fetch --tags --force
+
+      - name: Configure GIT identity
+        run: |
+          git config --global user.name "Automation Bot"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Checkout release branch
+        working-directory: target_repo
+        run: |
+          git checkout ${{ inputs.release_branch }}
+          git pull origin ${{ inputs.release_branch }}
+
+      - name: Get release version
+        working-directory: target_repo
+        id: get_version
+        run: |
+          VERSION=$(git describe --tags --abbrev=0)
+          echo "VERSION=$VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create PR release -> main
+        working-directory: target_repo
+        id: pr_release_main
+        run: |
+          PR1=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.event.inputs.repo_url }}/pulls \
+            -d "{
+              \"title\": \"Deploy ${{ steps.get_version.outputs.VERSION }} to ${{ inputs.main_branch }}\",
+              \"base\": \"${{ inputs.main_branch }}\",
+              \"head\": \"${{ inputs.release_branch }}\"
+            }" | jq -r .number)
+          if [[ "$PR1" == "null" ]]; then
+            echo "ERROR: failed to create PR release -> main"
+            exit 1
+          fi
+          echo "PR1=$PR1" >> $GITHUB_OUTPUT
+
+      - name: Merge PR release -> main
+        run: |
+          curl -s -X PUT \
+            -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.event.inputs.repo_url }}/pulls/${{ steps.pr_release_main.outputs.PR1 }}/merge \
+            -d '{"merge_method":"merge"}'
+
+      - name: Create PR main -> develop
+        working-directory: target_repo
+        id: pr_main_develop
+        run: |
+          git fetch
+          PR2=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.event.inputs.repo_url }}/pulls \
+            -d "{
+              \"title\": \"Sync post-deploy ${{ steps.get_version.outputs.VERSION }}\",
+              \"base\": \"${{ inputs.develop_branch }}\",
+              \"head\": \"${{ inputs.main_branch }}\"
+            }" | jq -r .number)
+          if [[ "$PR2" == "null" ]]; then
+            echo "ERROR: failed to create PR main -> develop"
+            exit 1
+          fi
+          echo "PR2=$PR2" >> $GITHUB_OUTPUT
+
+      - name: Merge PR main -> develop
+        run: |
+          curl -s -X PUT \
+            -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.event.inputs.repo_url }}/pulls/${{ steps.pr_main_develop.outputs.PR2 }}/merge \
+            -d '{"merge_method":"merge"}'
+
+      - name: Publish GitHub Release
+        run: |
+          RELEASE_ID=$(curl -s -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.event.inputs.repo_url }}/releases/tags/${{ steps.get_version.outputs.VERSION }}" \
+            | jq -r '.id')
+
+          if [[ -z "$RELEASE_ID" || "$RELEASE_ID" == "null" ]]; then
+            echo "[ERROR]: Release not found for tag ${{ steps.get_version.outputs.VERSION }}, skipping auto publish."
+          else
+            curl -X PATCH \
+              -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.event.inputs.repo_url }}/releases/$RELEASE_ID" \
+              -d '{"draft": false, "prerelease": false, "make_latest": true}'
+          fi
+
+      - name: Done
+        run: echo "🎉 Deploy finished successfully."
