@@ -1,0 +1,122 @@
+name: Deploy Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "owner/repo del repo objetivo"
+        required: true
+      main_branch:
+        description: "Branch de producción"
+        required: false
+        default: "master"
+      release_branch:
+        description: "Branch de staging/release"
+        required: false
+        default: "nextrelease"
+      develop_branch:
+        description: "Branch de QA"
+        required: false
+        default: "nextrelease_qa"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ---------------------------------------------------------
+      # Create GitHub App Token
+      # ---------------------------------------------------------
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      # ---------------------------------------------------------
+      # Validate access to target repo
+      # ---------------------------------------------------------
+      - name: Validate access
+        run: |
+          echo "Validating access to ${{ github.event.inputs.repo_url }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ steps.app-token.outputs.token }}" \
+            https://api.github.com/repos/${{ github.event.inputs.repo_url }})
+
+          if [[ "$STATUS" != "200" && "$STATUS" != "301" ]]; then
+            echo "ERROR: GitHub App does not have access to repo."
+            exit 1
+          fi
+
+      # ---------------------------------------------------------
+      # Checkout target repo
+      # ---------------------------------------------------------
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.inputs.repo_url }}
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+          path: repo
+
+      # ---------------------------------------------------------
+      # Fetch tags
+      # ---------------------------------------------------------
+      - name: Fetch tags
+        working-directory: repo
+        run: git fetch --tags --force
+
+      # ---------------------------------------------------------
+      # Detect latest version tag
+      # ---------------------------------------------------------
+      - name: Detect version
+        id: detect
+        working-directory: repo
+        run: |
+          version=$(git describe --tags --abbrev=0)
+          echo "Found version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------
+      # Deploy release (embedded shell script)
+      # ---------------------------------------------------------
+      - name: Deploy release
+        working-directory: repo
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_VERSION: ${{ steps.detect.outputs.version }}
+          MAIN_BRANCH: ${{ github.event.inputs.main_branch }}
+          RELEASE_BRANCH: ${{ github.event.inputs.release_branch }}
+          DEVELOP_BRANCH: ${{ github.event.inputs.develop_branch }}
+          REPO_URL: ${{ github.event.inputs.repo_url }}
+        run: |
+          set -euo pipefail
+
+          echo "Merging $RELEASE_BRANCH → $MAIN_BRANCH"
+          git checkout "$MAIN_BRANCH"
+          git pull origin "$MAIN_BRANCH"
+          git merge --no-ff "$RELEASE_BRANCH" -m "Deploy $RELEASE_VERSION"
+          git push origin "$MAIN_BRANCH"
+
+          echo "Merging $MAIN_BRANCH → $DEVELOP_BRANCH"
+          git checkout "$DEVELOP_BRANCH"
+          git pull origin "$DEVELOP_BRANCH"
+          git merge --no-ff "$MAIN_BRANCH" -m "Sync after deploy $RELEASE_VERSION"
+          git push origin "$DEVELOP_BRANCH"
+
+          echo "Publishing GitHub Release $RELEASE_VERSION"
+          curl -X PATCH \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO_URL/releases/tags/$RELEASE_VERSION \
+            -d '{"draft":false}'
+
+          echo "✔ Deployment complete."
+
+      - name: Done
+        run: echo "🎉 Deploy pipeline finished successfully."
