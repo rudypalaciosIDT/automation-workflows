@@ -130,7 +130,7 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/$REPO_URL/releases/tags/$VERSION \
-            -d '{"draft": false}'
+            -d '{"draft": false, "prerelease": false}'
 
           echo "✔ Deployment complete for $VERSION"
 
