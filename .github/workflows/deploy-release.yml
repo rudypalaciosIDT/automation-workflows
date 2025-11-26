@@ -86,6 +86,8 @@ jobs:
         id: detect
         working-directory: repo
         run: |
+          git branch
+          git log
           version=$(git describe --tags --abbrev=0)
           echo "Found version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
