@@ -95,7 +95,7 @@ jobs:
 
           git checkout "${RELEASE_BRANCH}"
           RELEASE_VERSION=$(git describe --tags --abbrev=0)
-          echo "Found version: $version"
+          echo "Found version: $RELEASE_VERSION"
           
           echo "Merging $RELEASE_BRANCH → $MAIN_BRANCH"
           git checkout "$MAIN_BRANCH"
