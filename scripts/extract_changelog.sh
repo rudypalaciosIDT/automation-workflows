@@ -15,29 +15,34 @@ pr_linkify() {
 }
 
 extract_and_append_changelog() {
-    local VERSION="$1"
-    local CHANGELOG_FILE="Changelog.md"
-    local TEMP_FILE
+    local VERSION CHANGELOG_FILE TEMP_FILE
+    VERSION=$1
+    CHANGELOG_FILE="Changelog.md"
     TEMP_FILE=$(mktemp)
+
+    git remote -v
+    git branch
+    git log
 
     echo "# Changelog" > "$TEMP_FILE"
     echo "## $VERSION" >> "$TEMP_FILE"
 
-    git log HEAD^1..HEAD --merges \
-        --grep="^Merge pull request" \
-        --pretty=format:"%s" |
-    tail -n +2 |
-    sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /' |
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    git log HEAD^1..HEAD --merges --grep="^Merge pull request" --pretty=format:"%s" \
+    | tail -n +2 \
+    | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /' \
+    | while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ $line =~ ^#([0-9]+)[[:space:]]+([A-Z]+-[0-9]+)-?(.*)$ ]]; then
             pr_no="#${BASH_REMATCH[1]}"
             ticket_no="${BASH_REMATCH[2]}"
             description="${BASH_REMATCH[3]//-/ }"
+
             output="  - ${ticket_no}: ${description^} (${pr_no})"
         else
             output="  - $line"
         fi
-        echo "$output"
+
+        echo $output
+
     done | pr_linkify | jira_linkify >> "$TEMP_FILE"
 
     echo -e "\n**Full Changelog**: https://github.com/$REPO_URL/commits/$VERSION\n" >> "$TEMP_FILE"

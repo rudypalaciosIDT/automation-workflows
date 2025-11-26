@@ -38,15 +38,14 @@ promote_release() {
   local release_branch_name pr_number pr_state merged
 
   log_info "Switching to temporary branch: $TEMPORARY_RELEASE_BRANCH"
-  git fetch origin "$TEMPORARY_RELEASE_BRANCH" --quiet
-  git checkout "$TEMPORARY_RELEASE_BRANCH" --quiet
-  git pull origin "$TEMPORARY_RELEASE_BRANCH" --quiet
+  git fetch origin "$TEMPORARY_RELEASE_BRANCH"
+  git checkout "$TEMPORARY_RELEASE_BRANCH"
+  git pull origin "$TEMPORARY_RELEASE_BRANCH"
 
   ##############################################################################
   # Detect RC version and determine release type
   ##############################################################################
   log_info "Detecting current RC tag…"
-  git log
   tag=$(git describe --tags --abbrev=0)
   release_type=${tag%%-*}
 
@@ -62,7 +61,7 @@ promote_release() {
   extract_and_append_changelog "$release_version"
 
   git add package.json Changelog.md
-  git commit -m "Bump to $release_version and update Changelog.md" --quiet
+  git commit -m "Bump to $release_version and update Changelog.md"
 
   ##############################################################################
   # Rename temp branch → release/X.Y.Z
@@ -71,8 +70,8 @@ promote_release() {
 
   log_info "Renaming $TEMPORARY_RELEASE_BRANCH → $release_branch_name"
   git branch -m "$release_branch_name"
-  git push origin "$release_branch_name" --quiet
-  git push origin --delete "$TEMPORARY_RELEASE_BRANCH" --quiet || log_warning "Temporary branch already deleted"
+  git push origin "$release_branch_name"
+  git push origin --delete "$TEMPORARY_RELEASE_BRANCH" || log_warning "Temporary branch already deleted"
 
   ##############################################################################
   # Create PR via REST API
@@ -139,7 +138,7 @@ promote_release() {
 
   # Create lightweight tag locally & push
   git tag -a "$release_version" -m "Release $release_version"
-  git push origin "$release_version" --quiet
+  git push origin "$release_version"
 
   ##############################################################################
   # Create GitHub Release
