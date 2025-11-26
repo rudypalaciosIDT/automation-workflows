@@ -37,6 +37,10 @@ jobs:
         with:
           repository: ${{ inputs.repo_url }}
           token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags --force
 
       - name: Checkout automation repo scripts
         uses: actions/checkout@v4
