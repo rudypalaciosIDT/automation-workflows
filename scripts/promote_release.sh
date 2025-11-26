@@ -46,6 +46,7 @@ promote_release() {
   # Detect RC version and determine release type
   ##############################################################################
   log_info "Detecting current RC tag…"
+  git log
   tag=$(git describe --tags --abbrev=0)
   release_type=${tag%%-*}
 
