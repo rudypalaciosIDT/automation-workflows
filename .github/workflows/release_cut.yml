@@ -28,6 +28,9 @@ jobs:
   prepare_release:
     runs-on: ubuntu-latest
 
+    env:
+      TEMPORARY_RELEASE_BRANCH: release/candidate
+
     steps:
       ###########################################################
       # 1. Generar installation token de la GitHub App
@@ -97,8 +100,6 @@ jobs:
       # 6. Eliminar rama temporal si existe
       ###########################################################
       - name: Delete temporary release branch if exists
-        env:
-          TEMPORARY_RELEASE_BRANCH: rc-temp
         run: |
           if git rev-parse --verify "$TEMPORARY_RELEASE_BRANCH" >/dev/null 2>&1; then
             echo "⚠️ Branch exists, deleting..."
@@ -109,8 +110,6 @@ jobs:
       # 7. Crear la rama de release candidate
       ###########################################################
       - name: Create temporary release branch
-        env:
-          TEMPORARY_RELEASE_BRANCH: rc-temp
         run: |
           git checkout -b "$TEMPORARY_RELEASE_BRANCH"
 
@@ -123,7 +122,15 @@ jobs:
           node-version: 20
 
       ###########################################################
-      # 9. Bump versión RC
+      # 9. Identificar que es automatizado por el GH bot
+      ###########################################################
+      - name: Configure Git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      ###########################################################
+      # 10. Bump versión RC
       ###########################################################
       - name: Bump version to next RC
         id: bump
@@ -134,17 +141,16 @@ jobs:
           echo "rc_version=$rc_version" >> $GITHUB_OUTPUT
 
       ###########################################################
-      # 10. Push de la rama + tags
+      # 11. Push de la rama + tags
       ###########################################################
       - name: Push branch and tags
         env:
-          TEMPORARY_RELEASE_BRANCH: rc-temp
           TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           git push https://x-access-token:${TOKEN}@github.com/${{ github.event.inputs.repo_url }} "$TEMPORARY_RELEASE_BRANCH" --follow-tags
 
       ###########################################################
-      # 11. Mensaje de éxito
+      # 12. Mensaje de éxito
       ###########################################################
       - name: Success message
         run: echo "🎉 Release Candidate ${{ steps.bump.outputs.rc_version }} created and pushed!"
