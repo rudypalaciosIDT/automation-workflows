@@ -1,0 +1,66 @@
+name: Promote Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: "owner/repo"
+        required: true
+        type: string
+      main_branch:
+        description: "Main branch"
+        default: "master"
+        type: string
+      release_branch:
+        description: "Release branch"
+        default: "nextrelease"
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.PRIVATE_KEY }}
+
+      - name: Get repository code (external repo)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo_url }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Checkout automation repo scripts
+        uses: actions/checkout@v4
+        with:
+          path: automation
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "Automation Bot"
+
+      - name: Install Node (for npm version)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run promote release
+        env:
+          REPO_URL: ${{ inputs.repo_url }}
+          MAIN_BRANCH: ${{ inputs.main_branch }}
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          TEMPORARY_RELEASE_BRANCH: "release/candidate"
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          chmod +x automation/scripts/promote_release.sh
+          automation/scripts/promote_release.sh
