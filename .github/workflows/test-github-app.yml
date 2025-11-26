@@ -16,10 +16,12 @@ jobs:
   test-app-token:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # permiso mínimo para git push si luego lo activas
+      contents: write
     steps:
       - name: Checkout automation-workflows
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Generate GitHub App token
         id: app_token
@@ -31,25 +33,27 @@ jobs:
       - name: Show token prefix (debug only)
         run: |
           echo "Token length: ${{ steps.app_token.outputs.token }}" >/dev/null || true
-          # NOT printing full token for security; just confirm there's output
           if [ -z "${{ steps.app_token.outputs.token }}" ]; then
             echo "No token returned" && exit 1
           fi
           echo "Token appears generated."
 
-      - name: Checkout target repo using App token
+      - name: Checkout target repo using App token (into subdir)
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.inputs.target_repo }}
           token: ${{ steps.app_token.outputs.token }}
           fetch-depth: 0
+          path: target-repo
 
       - name: Show current repo info (sanity)
         run: |
-          echo "Checked out repository:"
-          git remote -v
-          echo "Current branch: $(git rev-parse --abbrev-ref HEAD || echo none)"
-          ls -la
+          echo "Checked out automation-workflows (workspace):"
+          ls -la "$GITHUB_WORKSPACE"
+          echo
+          echo "Checked out target repo (target-repo):"
+          ls -la "$GITHUB_WORKSPACE/target-repo"
+          echo "Current branch (automation-workflows): $(git -C "$GITHUB_WORKSPACE" rev-parse --abbrev-ref HEAD || echo none)"
 
-      - name: Run prepare_release_test script
-        run: bash ./scripts/prepare_release_test.sh "${{ github.event.inputs.version_type }}"
+      - name: Run prepare_release_test script (from automation-workflows)
+        run: bash "$GITHUB_WORKSPACE/scripts/prepare_release_test.sh" "${{ github.event.inputs.version_type }}"
