@@ -111,7 +111,7 @@ jobs:
         id: promote
         working-directory: target_repo
         env:
-          RELEASE_VERSION: ${{ steps.bump_release.outputs.release_version }}
+          VERSION: ${{ steps.bump_release.outputs.release_version }}
           TEMPORARY_RELEASE_BRANCH: "release/candidate"
           RELEASE_BRANCH: ${{ inputs.release_branch }}
           REPO_URL: ${{ inputs.repo_url }}
@@ -132,9 +132,10 @@ jobs:
       - name: Create GitHub Release (draft prerelease)
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.promote.outputs.release_version }}
-          name: ${{ steps.promote.outputs.release_version }}
-          body_path: target_repo/${{ steps.promote.outputs.NOTES_FILE }}
+          repository: ${{ inputs.repo_url }}
+          tag_name: ${{ steps.bump_release.outputs.release_version }}
+          name: ${{ steps.bump_release.outputs.release_version }}
+          body_path: ${{ steps.compute_notes.outputs.NOTES_FILE }}
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}

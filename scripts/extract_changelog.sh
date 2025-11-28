@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euox pipefail
+set -euo pipefail
 
 jira_linkify() {
     while IFS= read -r line; do
@@ -22,6 +22,19 @@ extract_and_append_changelog() {
     echo "# Changelog" > "$TEMP_FILE"
     echo "## $VERSION" >> "$TEMP_FILE"
 
+    echo "===========================One ==========================="
+    git log ${RELEASE_BRANCH}..${TEMPORARY_RELEASE_BRANCH} --merges --grep="^Merge pull request" --pretty=format:"%s"
+
+    echo "===========================two ==========================="
+    git log ${RELEASE_BRANCH}..${TEMPORARY_RELEASE_BRANCH} --merges --grep="^Merge pull request" --pretty=format:"%s" \
+    | tail -n +2
+
+    echo "===========================three ==========================="
+    git log ${RELEASE_BRANCH}..${TEMPORARY_RELEASE_BRANCH} --merges --grep="^Merge pull request" --pretty=format:"%s" \
+    | tail -n +2 \
+    | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /'
+    
+    echo "===========================four ==========================="
     git log ${RELEASE_BRANCH}..${TEMPORARY_RELEASE_BRANCH} --merges --grep="^Merge pull request" --pretty=format:"%s" \
     | tail -n +2 \
     | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /' \
@@ -43,9 +56,12 @@ extract_and_append_changelog() {
     echo -e "\n**Full Changelog**: https://github.com/$REPO_URL/commits/$VERSION\n" >> "$TEMP_FILE"
 
     NOTES_FILE=$(mktemp)
+    git tag
     TAG_DATE=$(git log -1 --format=%ad --date=short "$VERSION" || echo "")
     echo "## Release date: $TAG_DATE" > "$NOTES_FILE"
     tail -n +3 "$TEMP_FILE" >> "$NOTES_FILE"
+
+    echo "NOTES_FILE=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
     if [[ -f "$CHANGELOG_FILE" ]]; then
         tail -n +2 "$CHANGELOG_FILE" >> "$TEMP_FILE"
@@ -54,3 +70,5 @@ extract_and_append_changelog() {
     mv "$TEMP_FILE" "$CHANGELOG_FILE"
     echo "[OK] Changelog updated for $VERSION"
 }
+
+extract_and_append_changelog
