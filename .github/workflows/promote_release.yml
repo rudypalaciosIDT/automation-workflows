@@ -36,7 +36,7 @@ jobs:
           app_id: ${{ secrets.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Get repository code (external repo)
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo_url }}
@@ -44,37 +44,80 @@ jobs:
           fetch-depth: 0
           path: target_repo
 
-      - name: Fetch tags
-        working-directory: target_repo
-        run: |
-          git fetch --tags --force
-          git tag
-
-      - name: Checkout automation repo scripts
+      - name: Checkout automation toolkit
         uses: actions/checkout@v4
         with:
-          path: automation
           token: ${{ steps.app_token.outputs.token }}
+          path: automation
 
-      - name: Configure GIT identity
-        run: |
-          git config --global user.name "Automation Bot"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Install Node (for npm version)
+      - name: Install Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Run promote release
-        working-directory: target_repo
-        env:
-          JIRA_URL: ${{ secrets.JIRA_URL }}
-          REPO_URL: ${{ inputs.repo_url }}
-          MAIN_BRANCH: ${{ inputs.main_branch }}
-          RELEASE_BRANCH: ${{ inputs.release_branch }}
-          TEMPORARY_RELEASE_BRANCH: "release/candidate"
-          GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+      - name: Configure Git identity
         run: |
-          chmod +x ../automation/scripts/promote_release.sh
-          ../automation/scripts/promote_release.sh
+          git config --global user.name "${{ vars.APP_SLUG }}[bot]"
+          git config --global user.email "${{ secrets.APP_ID }}+${{ vars.APP_SLUG }}[bot]@users.noreply.github.com"
+
+      - name: Checkout release candidate branch
+        working-directory: target_repo
+        run: |
+          git checkout nextrelease
+          git checkout release/candidate
+
+      - name: Detect current RC version
+        id: detect_rc
+        working-directory: target_repo
+        run: |
+          tag=$(git describe --tags --abbrev=0)
+          release_type=${tag%%-*}
+          echo "[OK] Found: ${release_type}"
+          echo "tag=${tag}" >> $GITHUB_OUTPUT
+          echo "release_type=${release_type}" >> $GITHUB_OUTPUT
+
+      - name: "Bumping package ${{ steps.detect_rc.outputs.tag }} → ${{ steps.detect_rc.outputs.release_type }}" # Bump to final release version
+        id: bump_release
+        working-directory: target_repo
+        run: |
+          release_version=$(npm version "${{ steps.detect_rc.outputs.release_type }}" --no-git-tag-version)
+          echo "release_version=$release_version" >> $GITHUB_OUTPUT
+
+      - name: Compute release notes
+        id: compute_notes
+        working-directory: target_repo
+        run: |
+          echo "Computing release notes for version ${{ steps.bump_release.outputs.release_version }}"
+          git branch
+          git log nextrelease..release/candidate --merges --grep="^Merge pull request" --pretty=format:"%s" | tail -n +2 | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /'
+
+#       - name: Promote release
+#         id: promote
+#         working-directory: target_repo
+#         env:
+#           GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+#           REPO_URL: ${{ inputs.repo_url }}
+#           MAIN_BRANCH: ${{ inputs.main_branch }}
+#           RELEASE_BRANCH: ${{ inputs.release_branch }}
+#           TEMPORARY_RELEASE_BRANCH: "release/candidate"
+#           JIRA_URL: ${{ secrets.JIRA_URL || '' }}
+#         run: |
+#           chmod +x ../automation/scripts/promote_release.sh
+#           ../automation/scripts/promote_release.sh
+
+#       - name: Create GitHub Release (draft prerelease)
+#         uses: softprops/action-gh-release@v1
+#         with:
+#           tag_name: ${{ steps.promote.outputs.release_version }}
+#           name: ${{ steps.promote.outputs.release_version }}
+#           body_path: target_repo/${{ steps.promote.outputs.NOTES_FILE }}
+#           draft: true
+#           prerelease: true
+#         env:
+#           GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+
+#       - name: Done
+#         run: echo "Release promotion complete → version ${{ steps.promote.outputs.release_version }}"

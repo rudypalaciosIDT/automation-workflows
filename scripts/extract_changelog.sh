@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euox pipefail
+set -euo pipefail
 
 jira_linkify() {
     while IFS= read -r line; do
@@ -19,12 +19,6 @@ extract_and_append_changelog() {
     VERSION=$1
     CHANGELOG_FILE="Changelog.md"
     TEMP_FILE=$(mktemp)
-
-    git remote -v
-    git branch
-    git tag
-    git log
-    git log HEAD^1..HEAD
 
     echo "# Changelog" > "$TEMP_FILE"
     echo "## $VERSION" >> "$TEMP_FILE"
