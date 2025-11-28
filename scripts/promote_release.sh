@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# extract_changelog.sh debe estar en el mismo directorio
 source "$SCRIPT_DIR/extract_changelog.sh"
 
 API_URL="https://api.github.com"
@@ -32,75 +33,34 @@ github_api() {
 }
 
 promote_release() {
-  local owner repo
-  owner="${REPO_URL%%/*}"
-  repo="${REPO_URL##*/}"
-
-  log_info "Switching to temporary branch: $TEMPORARY_RELEASE_BRANCH"
-
-  # Ensure we have the branch and up-to-date refs
-  git fetch origin "$TEMPORARY_RELEASE_BRANCH" --tags --force
-  if ! git ls-remote --exit-code --heads origin "$TEMPORARY_RELEASE_BRANCH" >/dev/null 2>&1; then
-    log_error "Temporary branch '$TEMPORARY_RELEASE_BRANCH' not found on remote origin."
-    exit 1
-  fi
-
-  git checkout "$TEMPORARY_RELEASE_BRANCH"
-  git pull origin "$TEMPORARY_RELEASE_BRANCH"
-
-  ##############################################################################
-  # Detect RC tag and release type
-  ##############################################################################
-  log_info "Detecting current RC tag…"
-  # This will exit non-zero if there are no tags; handle that
-  if ! tag=$(git describe --tags --abbrev=0); then
-    log_error "No tags found on repository — cannot detect RC tag."
-    exit 1
-  fi
-
-  release_type=${tag%%-*}
-  log_success "Detected tag: $tag -> release_type: $release_type"
-
-  ##############################################################################
-  # Bump version to stable and update changelog
-  ##############################################################################
-  log_info "Bumping version $tag → stable ($release_type)"
-  release_version=$(npm version "$release_type" --no-git-tag-version)
-  log_success "Computed release_version: $release_version"
-
-  log_info "Updating changelog for $release_version"
-  extract_and_append_changelog "$release_version"
-
-  # commit changes
-  git add package.json Changelog.md || true
-  if git diff --cached --quiet; then
-    log_warning "Nothing staged to commit (package.json/Changelog.md unchanged)."
-  else
-    git commit -m "Bump to $release_version and update Changelog.md"
-    log_success "Committed package.json and Changelog.md"
-  fi
-
-  ##############################################################################
-  # Rename temp branch → release/X.Y.Z and push
-  ##############################################################################
-  release_branch_name="release/$release_version"
+# Rename temp branch → release/X.Y.Z and push
+  release_branch_name="release/$RELEASE_VERSION"
   log_info "Renaming branch $TEMPORARY_RELEASE_BRANCH → $release_branch_name"
-  git branch -m "$release_branch_name"
-
-  log_info "Pushing new release branch $release_branch_name to origin"
-  git push origin "$release_branch_name"
-
-  log_info "Attempting to delete remote temporary branch $TEMPORARY_RELEASE_BRANCH"
-  if ! git push origin --delete "$TEMPORARY_RELEASE_BRANCH" >/dev/null 2>&1; then
-    log_warning "Remote temporary branch deletion failed (may be already deleted)."
+  if git branch -m "$release_branch_name"; then
+      log_success "Branch renamed to '$release_branch_name'."
+  else
+      log_error "Failed to rename branch to '$release_branch_name'. Aborting."
+      exit 1
   fi
 
-  ##############################################################################
-  # Create PR via REST API
-  ##############################################################################
+  # Push renamed branch
+  if git push origin "$release_branch_name"; then
+      log_success "Successfully pushed '$release_branch_name' to origin."
+
+      if git push origin --delete "$TEMPORARY_RELEASE_BRANCH" --quiet; then
+          log_success "Temporary branch '$TEMPORARY_RELEASE_BRANCH' deleted from origin."
+      else
+          log_warning "Could not delete temporary branch '$TEMPORARY_RELEASE_BRANCH'. It may not exist."
+      fi
+  else
+      log_error "Failed to push '$release_branch_name' to origin. Temporary branch will NOT be deleted."
+      exit 1
+  fi
+
+# Create PR via REST API
   log_info "Creating PR $release_branch_name -> $RELEASE_BRANCH"
   pr_payload=$(jq -n \
-    --arg title "Release $release_version" \
+    --arg title "Release $RELEASE_VERSION" \
     --arg head "$release_branch_name" \
     --arg base "$RELEASE_BRANCH" \
     --arg body "Automated promotion of release candidate." \
@@ -117,19 +77,14 @@ promote_release() {
 
   log_success "PR created: $pr_url (#$pr_number)"
 
-  ##############################################################################
-  # Try to merge immediately (merge commit). This mirrors tu script anterior.
-  ##############################################################################
+# Try to merge immediately (merge commit).
   log_info "Attempting to merge PR #$pr_number (merge commit)"
   merge_payload='{"merge_method":"merge"}'
   merge_resp=$(github_api PUT "$REPO_URL/pulls/$pr_number/merge" "$merge_payload" 2>&1) || {
     log_warning "Merge attempt failed or returned non-2xx: $merge_resp"
-    # Do not exit here; we'll poll for PR to be merged by auto-merge or other actors.
   }
 
-  ##############################################################################
-  # Poll PR status until merged (timeout after a while)
-  ##############################################################################
+# Poll PR status until merged (timeout after a while)
   log_info "Waiting for PR #$pr_number to merge…"
   local merged="false"
   for i in {1..60}; do
@@ -146,27 +101,6 @@ promote_release() {
     log_error "Timeout: PR #$pr_number did not merge in time."
     exit 1
   fi
-
-  ##############################################################################
-  # Create annotated tag and push
-  ##############################################################################
-  log_info "Creating annotated tag $release_version"
-  git tag -a "$release_version" -m "Release $release_version"
-  git push origin "$release_version"
-
-  ##############################################################################
-  # NOTES_FILE already created by extract_and_append_changelog.sh
-  # Export outputs for GitHub Actions if available
-  ##############################################################################
-  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-    echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
-    # If NOTES_FILE variable set by extract_changelog.sh, export it; else export empty
-    NOTES_FILE_PATH="${NOTES_FILE:-}"
-    echo "NOTES_FILE=$NOTES_FILE_PATH" >> "$GITHUB_OUTPUT"
-  fi
-
-  log_success "Release $release_version successfully promoted (branch: $release_branch_name)."
-  log_info "PR: $pr_url"
 }
 
 promote_release

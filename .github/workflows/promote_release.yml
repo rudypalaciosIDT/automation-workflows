@@ -89,35 +89,55 @@ jobs:
       - name: Compute release notes
         id: compute_notes
         working-directory: target_repo
+        env:
+          REPO_URL: ${{ inputs.repo_url }}
+          JIRA_URL: ${{ secrets.JIRA_URL || '' }}
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          TEMPORARY_RELEASE_BRANCH: "release/candidate"
+          VERSION: ${{ steps.bump_release.outputs.release_version }}
         run: |
-          echo "Computing release notes for version ${{ steps.bump_release.outputs.release_version }}"
-          git branch
-          git log nextrelease..release/candidate --merges --grep="^Merge pull request" --pretty=format:"%s" | tail -n +2 | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /'
+          chmod +x ../automation/scripts/extract_changelog.sh
+          ../automation/scripts/extract_changelog.sh
 
-#       - name: Promote release
-#         id: promote
-#         working-directory: target_repo
-#         env:
-#           GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
-#           REPO_URL: ${{ inputs.repo_url }}
-#           MAIN_BRANCH: ${{ inputs.main_branch }}
-#           RELEASE_BRANCH: ${{ inputs.release_branch }}
-#           TEMPORARY_RELEASE_BRANCH: "release/candidate"
-#           JIRA_URL: ${{ secrets.JIRA_URL || '' }}
-#         run: |
-#           chmod +x ../automation/scripts/promote_release.sh
-#           ../automation/scripts/promote_release.sh
+      - name: Commit version bump and changelog update
+        working-directory: target_repo
+        env:
+          RELEASE_VERSION: ${{ steps.bump_release.outputs.release_version }}
+        run: |
+          git add package.json Changelog.md
+          git commit -m "Bump to $RELEASE_VERSION and update Changelog.md"
 
-#       - name: Create GitHub Release (draft prerelease)
-#         uses: softprops/action-gh-release@v1
-#         with:
-#           tag_name: ${{ steps.promote.outputs.release_version }}
-#           name: ${{ steps.promote.outputs.release_version }}
-#           body_path: target_repo/${{ steps.promote.outputs.NOTES_FILE }}
-#           draft: true
-#           prerelease: true
-#         env:
-#           GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+      - name: Promote release
+        id: promote
+        working-directory: target_repo
+        env:
+          RELEASE_VERSION: ${{ steps.bump_release.outputs.release_version }}
+          TEMPORARY_RELEASE_BRANCH: "release/candidate"
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          REPO_URL: ${{ inputs.repo_url }}
+          GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          chmod +x ../automation/scripts/promote_release.sh
+          ../automation/scripts/promote_release.sh
 
-#       - name: Done
-#         run: echo "Release promotion complete → version ${{ steps.promote.outputs.release_version }}"
+      - name: Create annotated tag and push
+        working-directory: target_repo
+        env:
+          VERSION: ${{ steps.bump_release.outputs.release_version }}
+        run: |
+          echo "[INFO] Creating annotated tag $VERSION"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+
+      - name: Create GitHub Release (draft prerelease)
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.promote.outputs.release_version }}
+          name: ${{ steps.promote.outputs.release_version }}
+          body_path: target_repo/${{ steps.promote.outputs.NOTES_FILE }}
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+
+      - name: Done
+        run: echo "Release promotion complete → version ${{ steps.promote.outputs.release_version }}"

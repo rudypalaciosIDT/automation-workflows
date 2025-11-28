@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -euox pipefail
 
 jira_linkify() {
     while IFS= read -r line; do
@@ -15,15 +15,14 @@ pr_linkify() {
 }
 
 extract_and_append_changelog() {
-    local VERSION CHANGELOG_FILE TEMP_FILE
-    VERSION=$1
+    local CHANGELOG_FILE TEMP_FILE
     CHANGELOG_FILE="Changelog.md"
     TEMP_FILE=$(mktemp)
 
     echo "# Changelog" > "$TEMP_FILE"
     echo "## $VERSION" >> "$TEMP_FILE"
 
-    git log HEAD^1..HEAD --merges --grep="^Merge pull request" --pretty=format:"%s" \
+    git log ${RELEASE_BRANCH}..${TEMPORARY_RELEASE_BRANCH} --merges --grep="^Merge pull request" --pretty=format:"%s" \
     | tail -n +2 \
     | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /' \
     | while IFS= read -r line || [[ -n "$line" ]]; do
