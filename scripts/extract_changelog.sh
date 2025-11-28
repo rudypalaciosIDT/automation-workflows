@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euox pipefail
+set -euo pipefail
 
 jira_linkify() {
     while IFS= read -r line; do
@@ -47,6 +47,8 @@ extract_and_append_changelog() {
     echo "## Release date: $TAG_DATE" > "$NOTES_FILE"
     tail -n +3 "$TEMP_FILE" >> "$NOTES_FILE"
 
+    echo "NOTES_FILE=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
     if [[ -f "$CHANGELOG_FILE" ]]; then
         tail -n +2 "$CHANGELOG_FILE" >> "$TEMP_FILE"
     fi
@@ -54,3 +56,5 @@ extract_and_append_changelog() {
     mv "$TEMP_FILE" "$CHANGELOG_FILE"
     echo "[OK] Changelog updated for $VERSION"
 }
+
+extract_and_append_changelog

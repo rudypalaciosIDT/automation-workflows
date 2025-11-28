@@ -2,8 +2,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# extract_changelog.sh debe estar en el mismo directorio
-source "$SCRIPT_DIR/extract_changelog.sh"
 
 API_URL="https://api.github.com"
 
@@ -34,7 +32,7 @@ github_api() {
 
 promote_release() {
 # Rename temp branch → release/X.Y.Z and push
-  release_branch_name="release/$RELEASE_VERSION"
+  release_branch_name="release/$VERSION"
   log_info "Renaming branch $TEMPORARY_RELEASE_BRANCH → $release_branch_name"
   if git branch -m "$release_branch_name"; then
       log_success "Branch renamed to '$release_branch_name'."
@@ -60,7 +58,7 @@ promote_release() {
 # Create PR via REST API
   log_info "Creating PR $release_branch_name -> $RELEASE_BRANCH"
   pr_payload=$(jq -n \
-    --arg title "Release $RELEASE_VERSION" \
+    --arg title "Release $VERSION" \
     --arg head "$release_branch_name" \
     --arg base "$RELEASE_BRANCH" \
     --arg body "Automated promotion of release candidate." \
