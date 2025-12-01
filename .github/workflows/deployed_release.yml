@@ -137,7 +137,7 @@ jobs:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           draft: false
           prerelease: false
-          make_latest: true
+          make_latest: "true"
         env:
           GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
 

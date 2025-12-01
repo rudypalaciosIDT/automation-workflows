@@ -26,7 +26,6 @@ extract_and_append_changelog() {
         --merges \
         --grep="^Merge pull request" \
         --pretty=format:"%s" \
-    | tail -n +2 \
     | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /' \
     | while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ $line =~ ^#([0-9]+)[[:space:]]+([A-Z]+-[0-9]+)-?(.*)$ ]]; then

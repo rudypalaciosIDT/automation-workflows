@@ -77,7 +77,15 @@ promote_release() {
 
 # Try to merge immediately (merge commit).
   log_info "Attempting to merge PR #$pr_number (merge commit)"
-  merge_payload='{"merge_method":"merge"}'
+  merge_payload=$(cat <<EOF
+{
+  "merge_method": "merge",
+  "commit_title": "Sync merge $release_branch_name -> $RELEASE_BRANCH",
+  "commit_message": "Merged automatically by GitHub Actions."
+}
+EOF
+)
+
   merge_resp=$(github_api PUT "$REPO_URL/pulls/$pr_number/merge" "$merge_payload" 2>&1) || {
     log_warning "Merge attempt failed or returned non-2xx: $merge_resp"
   }
