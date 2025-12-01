@@ -2,7 +2,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/extract_changelog.sh"
 
 API_URL="https://api.github.com"
 
@@ -30,154 +29,84 @@ github_api() {
       "$API_URL/repos/$endpoint"
   fi
 }
-################################################################################
-#                               MAIN FUNCTION
-################################################################################
+
 promote_release() {
-  local tag base_version major minor patch release_type release_version
-  local release_branch_name pr_number pr_state merged
+# Rename temp branch → release/X.Y.Z and push
+  release_branch_name="release/$VERSION"
+  log_info "Renaming branch $TEMPORARY_RELEASE_BRANCH → $release_branch_name"
+  if git branch -m "$release_branch_name"; then
+      log_success "Branch renamed to '$release_branch_name'."
+  else
+      log_error "Failed to rename branch to '$release_branch_name'. Aborting."
+      exit 1
+  fi
 
-  log_info "Switching to temporary branch: $TEMPORARY_RELEASE_BRANCH"
-  git fetch origin "$TEMPORARY_RELEASE_BRANCH"
-  git checkout "$TEMPORARY_RELEASE_BRANCH"
-  git pull origin "$TEMPORARY_RELEASE_BRANCH"
+  # Push renamed branch
+  if git push origin "$release_branch_name"; then
+      log_success "Successfully pushed '$release_branch_name' to origin."
 
-  ##############################################################################
-  # Detect RC version and determine release type
-  ##############################################################################
-  log_info "Detecting current RC tag…"
-  tag=$(git describe --tags --abbrev=0)
-  release_type=${tag%%-*}
+      if git push origin --delete "$TEMPORARY_RELEASE_BRANCH" --quiet; then
+          log_success "Temporary branch '$TEMPORARY_RELEASE_BRANCH' deleted from origin."
+      else
+          log_warning "Could not delete temporary branch '$TEMPORARY_RELEASE_BRANCH'. It may not exist."
+      fi
+  else
+      log_error "Failed to push '$release_branch_name' to origin. Temporary branch will NOT be deleted."
+      exit 1
+  fi
 
-  log_success "Detected release type: $release_type"
+# Create PR via REST API
+  log_info "Creating PR $release_branch_name -> $RELEASE_BRANCH"
+  pr_payload=$(jq -n \
+    --arg title "Release $VERSION" \
+    --arg head "$release_branch_name" \
+    --arg base "$RELEASE_BRANCH" \
+    --arg body "Automated promotion of release candidate." \
+    '{title: $title, head: $head, base: $base, body: $body, draft: false}')
 
-  ##############################################################################
-  # Bump version + update changelog
-  ##############################################################################
-  log_info "Bumping version $tag → stable ($release_type)"
-  release_version=$(npm version "$release_type" --no-git-tag-version)
+  pr_response=$(github_api POST "$REPO_URL/pulls" "$pr_payload")
+  pr_number=$(echo "$pr_response" | jq -r '.number // empty')
+  pr_url=$(echo "$pr_response" | jq -r '.html_url // empty')
 
-  log_info "Updating changelog for $release_version"
-  extract_and_append_changelog "$release_version"
-
-  git add package.json Changelog.md
-  git commit -m "Bump to $release_version and update Changelog.md"
-
-  ##############################################################################
-  # Rename temp branch → release/X.Y.Z
-  ##############################################################################
-  release_branch_name="release/$release_version"
-
-  log_info "Renaming $TEMPORARY_RELEASE_BRANCH → $release_branch_name"
-  git branch -m "$release_branch_name"
-  git push origin "$release_branch_name"
-  git push origin --delete "$TEMPORARY_RELEASE_BRANCH" || log_warning "Temporary branch already deleted"
-
-  ##############################################################################
-  # Create PR via REST API
-  ##############################################################################
-  log_info "Creating PR $release_branch_name → $RELEASE_BRANCH"
-
-  pr_response=$(github_api POST "$REPO_URL/pulls" \
-    "$(jq -n \
-      --arg title "Release $release_version" \
-      --arg head "$release_branch_name" \
-      --arg base "$RELEASE_BRANCH" \
-      --arg body "Automated promotion of release candidate." \
-      '{title: $title, head: $head, base: $base, body: $body}')")
-
-  pr_number=$(echo "$pr_response" | jq -r '.number')
-  pr_url=$(echo "$pr_response" | jq -r '.html_url')
-
-  if [[ "$pr_number" == "null" ]]; then
-    log_error "Failed to create PR: $pr_response"
+  if [[ -z "$pr_number" ]]; then
+    log_error "Failed to create PR. Response: $pr_response"
     exit 1
   fi
 
-  log_success "PR created: $pr_url"
+  log_success "PR created: $pr_url (#$pr_number)"
 
-  ##############################################################################
-  # Enable auto-merge (merge commit)
-  ##############################################################################
-  log_info "Enabling auto-merge on PR #$pr_number"
+# Try to merge immediately (merge commit).
+  log_info "Attempting to merge PR #$pr_number (merge commit)"
+  merge_payload=$(cat <<EOF
+{
+  "merge_method": "merge",
+  "commit_title": "Sync merge $release_branch_name -> $RELEASE_BRANCH",
+  "commit_message": "Merged automatically by GitHub Actions."
+}
+EOF
+)
 
-  github_api PUT "$REPO_URL/pulls/$pr_number/merge" \
-    '{"merge_method": "merge"}' >/dev/null || {
-      log_error "Auto-merge failed."
-      exit 1
-    }
+  merge_resp=$(github_api PUT "$REPO_URL/pulls/$pr_number/merge" "$merge_payload" 2>&1) || {
+    log_warning "Merge attempt failed or returned non-2xx: $merge_resp"
+  }
 
-  log_success "Auto-merge enabled"
-
-  ##############################################################################
-  # Poll PR status until merged
-  ##############################################################################
+# Poll PR status until merged (timeout after a while)
   log_info "Waiting for PR #$pr_number to merge…"
-
+  local merged="false"
   for i in {1..60}; do
-    pr_state=$(github_api GET "$REPO_URL/pulls/$pr_number" | jq -r '.state')
-    merged=$(github_api GET "$REPO_URL/pulls/$pr_number" | jq -r '.merged')
-
-    if [[ "$merged" == "true" ]]; then
+    sleep 5
+    pr_state_json=$(github_api GET "$REPO_URL/pulls/$pr_number")
+    merged=$(echo "$pr_state_json" | jq -r '.merged // false')
+    if [[ "$merged" == "true" || "$merged" == "True" ]]; then
       log_success "PR merged successfully."
       break
     fi
-
-    sleep 5
   done
 
-  if [[ "$merged" != "true" ]]; then
-    log_error "Timeout: PR did not merge in time."
+  if [[ "$merged" != "true" && "$merged" != "True" ]]; then
+    log_error "Timeout: PR #$pr_number did not merge in time."
     exit 1
   fi
-
-  ##############################################################################
-  # Create annotated tag
-  ##############################################################################
-  log_info "Creating Git tag $release_version"
-
-  # Create lightweight tag locally & push
-  git tag -a "$release_version" -m "Release $release_version"
-  git push origin "$release_version"
-
-  ##############################################################################
-  # Create GitHub Release
-  ##############################################################################
-  if [[ -z "${NOTES_FILE:-}" ]]; then
-    log_warning "NOTES_FILE not set — skipping GitHub release"
-  else
-    log_info "Creating GitHub Release $release_version"
-
-    # Confirm that the tag exists on GitHub before creating the release
-    echo "Waiting for GitHub to index tag $release_version..."
-    
-    for i in {1..20}; do
-      TAG=$(curl -s \
-        -H "Authorization: Bearer $GITHUB_TOKEN" \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/$REPO_URL/tags" | jq -r ".[].name" | grep -Fx "$release_version" || true)
-    
-      if [[ "$TAG" == "$release_version" ]]; then
-        echo "Tag is fully indexed ✔"
-        break
-      fi
-    
-      echo "Tag not indexed yet... retry $i/20"
-      sleep 4
-    done
-
-    github_api POST "$REPO_URL/releases" \
-      "$(jq -n \
-        --arg tag "$release_version" \
-        --arg name "$release_version" \
-        --arg target "$MAIN_BRANCH" \
-        --arg notes "$(cat "$NOTES_FILE")" \
-        '{tag_name: $tag, name: $name, target_commitish: $target, body: $notes, prerelease: true}')"
-
-    log_success "GitHub Release created."
-  fi
-
-  log_success "Release $release_version successfully promoted."
 }
 
 promote_release

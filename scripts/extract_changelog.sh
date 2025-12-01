@@ -15,20 +15,17 @@ pr_linkify() {
 }
 
 extract_and_append_changelog() {
-    local VERSION CHANGELOG_FILE TEMP_FILE
-    VERSION=$1
+    local CHANGELOG_FILE TEMP_FILE
     CHANGELOG_FILE="Changelog.md"
     TEMP_FILE=$(mktemp)
-
-    git remote -v
-    git branch
-    git log
 
     echo "# Changelog" > "$TEMP_FILE"
     echo "## $VERSION" >> "$TEMP_FILE"
 
-    git log HEAD^1..HEAD --merges --grep="^Merge pull request" --pretty=format:"%s" \
-    | tail -n +2 \
+    git log ${RELEASE_BRANCH}..${TEMPORARY_RELEASE_BRANCH} \
+        --merges \
+        --grep="^Merge pull request" \
+        --pretty=format:"%s" \
     | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /' \
     | while IFS= read -r line || [[ -n "$line" ]]; do
         if [[ $line =~ ^#([0-9]+)[[:space:]]+([A-Z]+-[0-9]+)-?(.*)$ ]]; then
@@ -48,9 +45,13 @@ extract_and_append_changelog() {
     echo -e "\n**Full Changelog**: https://github.com/$REPO_URL/commits/$VERSION\n" >> "$TEMP_FILE"
 
     NOTES_FILE=$(mktemp)
-    TAG_DATE=$(git log -1 --format=%ad --date=short "$VERSION" || echo "")
+    LAST_TAG=$(git tag --sort=-v:refname | head -n 1)
+    TAG_DATE=$(git log -1 --format=%ad --date=short "$LAST_TAG" || echo "")
+
     echo "## Release date: $TAG_DATE" > "$NOTES_FILE"
     tail -n +3 "$TEMP_FILE" >> "$NOTES_FILE"
+
+    echo "NOTES_FILE=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
     if [[ -f "$CHANGELOG_FILE" ]]; then
         tail -n +2 "$CHANGELOG_FILE" >> "$TEMP_FILE"
@@ -59,3 +60,5 @@ extract_and_append_changelog() {
     mv "$TEMP_FILE" "$CHANGELOG_FILE"
     echo "[OK] Changelog updated for $VERSION"
 }
+
+extract_and_append_changelog

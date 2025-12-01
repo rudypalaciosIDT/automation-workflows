@@ -19,7 +19,7 @@ on:
         default: patch
 
       develop_branch:
-        description: "QA branch"
+        description: "QA branch (base branch for RC)"
         required: true
         default: "nextrelease_qa"
         type: string
@@ -39,51 +39,21 @@ jobs:
           app_id: ${{ secrets.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Verify Repository Access
-        id: verify
-        env:
-          TOKEN: ${{ steps.app_token.outputs.token }}
-        run: |
-          echo "Checking access to repository: ${{ github.event.inputs.repo_url }}"
-
-          STATUS=$(curl -o /dev/null -s -w "%{http_code}" \
-            -H "Authorization: token $TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.event.inputs.repo_url }})
-
-          if [[ "$STATUS" != "200" ]]; then
-            echo "[ERROR] GitHub App can't access the target repository. HTTP STATUS: $STATUS"
-            exit 1
-          fi
-
-          echo "[OK] Access to repository verified. HTTP STATUS: $STATUS"
-
-      - name: Get repository code (external repo)
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo_url }}
           token: ${{ steps.app_token.outputs.token }}
           fetch-depth: 0
 
-      - name: Configure GIT identity
+      - name: Configure Git identity
         run: |
-          git config --global user.name "Automation Bot"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "${{ vars.APP_SLUG }}[bot]"
+          git config user.email "${{ secrets.APP_ID }}+${{ vars.APP_SLUG }}[bot]@users.noreply.github.com"
 
-      - name: Check working directory is clean
+      - name: Checkout develop branch
         run: |
-          if [[ -n "$(git status --porcelain)" ]]; then
-            echo "[ERROR] Working directory not clean. Commit or stash changes first."
-            exit 1
-          fi
-
-      - name: Update develop branch
-        env:
-          DEVELOP_BRANCH: ${{ github.event.inputs.develop_branch }}
-        run: |
-          git fetch origin "$DEVELOP_BRANCH"
-          git checkout "$DEVELOP_BRANCH"
-          git pull origin "$DEVELOP_BRANCH"
+          git checkout ${{ inputs.develop_branch }}
 
       - name: Delete temporary release branch if exists
         run: |
@@ -92,11 +62,11 @@ jobs:
             git branch -D "$TEMPORARY_RELEASE_BRANCH"
           fi
 
-      - name: Create temporary release branch
+      - name: Create RC branch
         run: |
           git checkout -b "$TEMPORARY_RELEASE_BRANCH"
 
-      - name: Install Node (for npm version)
+      - name: Install Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
