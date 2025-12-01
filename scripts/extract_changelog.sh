@@ -22,7 +22,10 @@ extract_and_append_changelog() {
     echo "# Changelog" > "$TEMP_FILE"
     echo "## $VERSION" >> "$TEMP_FILE"
 
-    git log ${RELEASE_BRANCH}..${TEMPORARY_RELEASE_BRANCH} --merges --grep="^Merge pull request" --pretty=format:"%s" \
+    git log ${RELEASE_BRANCH}..${TEMPORARY_RELEASE_BRANCH} \
+        --merges \
+        --grep="^Merge pull request" \
+        --pretty=format:"%s" \
     | tail -n +2 \
     | sed -E 's/^Merge pull request //; s/ from [^/]+\/?/ /' \
     | while IFS= read -r line || [[ -n "$line" ]]; do

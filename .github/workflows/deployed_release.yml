@@ -47,7 +47,7 @@ jobs:
           app_id: ${{ secrets.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Get repository code (external repo)
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo_url }}
@@ -55,14 +55,11 @@ jobs:
           fetch-depth: 0
           path: target_repo
 
-      - name: Fetch tags
+      - name: Configure Git identity
         working-directory: target_repo
-        run: git fetch --tags --force
-
-      - name: Configure GIT identity
         run: |
-          git config --global user.name "Automation Bot"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "${{ vars.APP_SLUG }}[bot]"
+          git config user.email "${{ secrets.APP_ID }}+${{ vars.APP_SLUG }}[bot]@users.noreply.github.com"
 
       - name: Checkout release branch
         working-directory: target_repo
@@ -87,7 +84,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.event.inputs.repo_url }}/pulls \
             -d "{
-              \"title\": \"Deploy ${{ steps.get_version.outputs.VERSION }} to ${{ inputs.main_branch }}\",
+              \"title\": \"Sync release -> main (Deploy ${{ steps.get_version.outputs.VERSION }})\",
               \"base\": \"${{ inputs.main_branch }}\",
               \"head\": \"${{ inputs.release_branch }}\"
             }" | jq -r .number)
@@ -103,7 +100,7 @@ jobs:
             -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.event.inputs.repo_url }}/pulls/${{ steps.pr_release_main.outputs.PR1 }}/merge \
-            -d '{"merge_method":"merge"}'
+            -d '{"merge_method":"merge", "commit_title":"Sync release -> main", "commit_message":"Merged automatically by GitHub Actions."}'
 
       - name: Create PR main -> develop
         working-directory: target_repo
@@ -115,7 +112,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.event.inputs.repo_url }}/pulls \
             -d "{
-              \"title\": \"Sync post-deploy ${{ steps.get_version.outputs.VERSION }}\",
+              \"title\": \"Sync main -> develop (Post-deploy ${{ steps.get_version.outputs.VERSION }})\",
               \"base\": \"${{ inputs.develop_branch }}\",
               \"head\": \"${{ inputs.main_branch }}\"
             }" | jq -r .number)
@@ -131,7 +128,7 @@ jobs:
             -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/${{ github.event.inputs.repo_url }}/pulls/${{ steps.pr_main_develop.outputs.PR2 }}/merge \
-            -d '{"merge_method":"merge"}'
+            -d '{"merge_method":"merge", "commit_title":"Sync main -> develop", "commit_message":"Merged automatically by GitHub Actions."}'
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v1
