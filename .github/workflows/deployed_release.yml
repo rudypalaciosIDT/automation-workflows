@@ -134,21 +134,15 @@ jobs:
             -d '{"merge_method":"merge"}'
 
       - name: Publish GitHub Release
-        run: |
-          RELEASE_ID=$(curl -s -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.event.inputs.repo_url }}/releases/tags/${{ steps.get_version.outputs.VERSION }}" \
-            | jq -r '.id')
-
-          if [[ -z "$RELEASE_ID" || "$RELEASE_ID" == "null" ]]; then
-            echo "[ERROR]: Release not found for tag ${{ steps.get_version.outputs.VERSION }}, skipping auto publish."
-          else
-            curl -X PATCH \
-              -H "Authorization: Bearer ${{ steps.app_token.outputs.token }}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.event.inputs.repo_url }}/releases/$RELEASE_ID" \
-              -d '{"draft": false, "prerelease": false, "make_latest": true}'
-          fi
+        uses: softprops/action-gh-release@v1
+        with:
+          repository: ${{ github.event.inputs.repo_url }}
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
 
       - name: Done
         run: echo "🎉 Deploy finished successfully."
