@@ -32,18 +32,51 @@ jobs:
       TEMPORARY_RELEASE_BRANCH: release/candidate
 
     steps:
-      - name: Generate GitHub App Token
-        id: app_token
+      - name: Generate App JWT
+        id: app_jwt
         uses: tibdex/github-app-token@v2
         with:
           app_id: ${{ secrets.APP_ID }}
           private_key: ${{ secrets.APP_PRIVATE_KEY }}
 
+      - name: Lookup installation for the repo owner
+        id: lookup
+        run: |
+          OWNER=$(echo "${{ inputs.repo_url }}" | cut -d'/' -f1)
+
+          installation_id=$(curl -s \
+            -H "Authorization: Bearer ${{ steps.app_jwt.outputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/app/installations \
+          | jq -r ".[] | select(.account.login==\"$OWNER\") | .id")
+
+          if [ -z "$installation_id" ] || [ "$installation_id" = "null" ]; then
+            echo "::error ::No installation found for owner: $OWNER"
+            exit 1
+          fi
+
+          echo "installation_id=$installation_id" >> $GITHUB_OUTPUT
+
+      - name: Generate Installation Token
+        id: installation_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+          installation_id: ${{ steps.lookup.outputs.installation_id }}
+
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo_url }}
+          token: ${{ steps.installation_token.outputs.token }}
+          fetch-depth: 0
+
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.repo_url }}
-          token: ${{ steps.app_token.outputs.token }}
+          token: ${{ steps.installation_token.outputs.token }}
           fetch-depth: 0
 
       - name: Configure Git identity
