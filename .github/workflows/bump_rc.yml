@@ -8,6 +8,12 @@ on:
         required: true
         type: string
 
+      dry_run:
+        description: "Dry run"
+        default: true
+        required: true
+        type: boolean
+
 jobs:
   bump-rc:
     runs-on: ubuntu-latest
@@ -60,11 +66,12 @@ jobs:
 
       - name: Bump release candidate version
         run: |
-          echo "[INFO] Bumping to next RC version"
           rc_version=$(npm version prerelease)
+          echo "[INFO] Bumping to next RC (${rc_version}) version"
           echo "RC_VERSION=$rc_version" >> $GITHUB_ENV
 
       - name: Push branch and tags
+        if: inputs.dry_run != true
         run: |
           echo "[INFO] Pushing updated '$TEMPORARY_RELEASE_BRANCH' and tags to remote"
           git push origin "$TEMPORARY_RELEASE_BRANCH" --follow-tags
@@ -81,3 +88,9 @@ jobs:
               exit 1
             fi
           fi
+      
+      - name: Dry-run summary
+        if: inputs.dry_run == true
+        run: |
+          echo "[DRY-RUN] Workflow completed successfully"
+          echo "[DRY-RUN] No changes were pushed to the remote repository"
