@@ -21,8 +21,16 @@ on:
       develop_branch:
         description: "QA branch (base branch for RC)"
         required: true
+        type: choice
+        options:
+          - nextrelease_qa
         default: "nextrelease_qa"
-        type: string
+
+      dry_run:
+        description: "Dry run"
+        default: true
+        required: true
+        type: boolean
 
 jobs:
   prepare_release:
@@ -56,10 +64,20 @@ jobs:
           git checkout ${{ inputs.develop_branch }}
 
       - name: Delete temporary release branch if exists
+        if: inputs.dry_run != true
         run: |
           if git rev-parse --verify "$TEMPORARY_RELEASE_BRANCH" >/dev/null 2>&1; then
             echo "[WARN] Branch exists, deleting..."
             git branch -D "$TEMPORARY_RELEASE_BRANCH"
+          fi
+
+      - name: Dry-run branch deletion check
+        if: inputs.dry_run == true
+        run: |
+          if git rev-parse --verify "$TEMPORARY_RELEASE_BRANCH" >/dev/null 2>&1; then
+            echo "[DRY-RUN] Branch '$TEMPORARY_RELEASE_BRANCH' would be deleted"
+          else
+            echo "[DRY-RUN] Branch '$TEMPORARY_RELEASE_BRANCH' does not exist"
           fi
 
       - name: Create RC branch
@@ -80,8 +98,15 @@ jobs:
           echo "rc_version=$rc_version" >> $GITHUB_OUTPUT
 
       - name: Push branch and tags
+        if: inputs.dry_run != true
         run: |
           git push origin "$TEMPORARY_RELEASE_BRANCH" --follow-tags
 
       - name: Success message
         run: echo "[OK] Release Candidate ${{ steps.bump.outputs.rc_version }} created and pushed!"
+
+      - name: Dry-run summary
+        if: inputs.dry_run == true
+        run: |
+          echo "[DRY-RUN] Workflow completed successfully"
+          echo "[DRY-RUN] No changes were pushed to the remote repository"
