@@ -10,15 +10,26 @@ on:
 
       main_branch:
         description: "Production branch"
-        default: "master"
         required: true
-        type: string
+        type: choice
+        options:
+          - main
+          - master
+        default: "main"
 
       release_branch:
         description: "Staging branch"
-        default: "nextrelease"
         required: true
-        type: string
+        type: choice
+        options:
+          - nextrelease
+        default: "nextrelease"
+
+      dry_run:
+        description: "Dry run"
+        default: true
+        required: true
+        type: boolean
 
 permissions:
   contents: write
@@ -127,9 +138,16 @@ jobs:
         run: |
           echo "[INFO] Creating annotated tag $VERSION"
           git tag -a "$VERSION" -m "Release $VERSION"
-          git push origin "$VERSION"
+
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            echo "[INFO] Pushing tag $VERSION"
+            git push origin "$VERSION"
+          else
+            echo "[DRY-RUN] Tag $VERSION created locally but NOT pushed"
+          fi
 
       - name: Create GitHub Release (draft prerelease)
+        if: inputs.dry_run != true
         uses: softprops/action-gh-release@v1
         with:
           repository: ${{ inputs.repo_url }}
@@ -142,3 +160,9 @@ jobs:
 
       - name: Done
         run: echo "Release promotion complete → version ${{ steps.promote.outputs.release_version }}"
+
+      - name: Dry-run summary
+        if: inputs.dry_run == true
+        run: |
+          echo "[DRY-RUN] Workflow completed successfully"
+          echo "[DRY-RUN] No changes were pushed to the remote repository"
