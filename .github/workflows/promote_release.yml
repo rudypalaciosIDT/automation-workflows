@@ -27,7 +27,7 @@ on:
 
       dry_run:
         description: "Dry run"
-        default: true
+        default: 'true'
         required: true
         type: boolean
 
@@ -147,7 +147,7 @@ jobs:
           fi
 
       - name: Create GitHub Release (draft prerelease)
-        if: inputs.dry_run != true
+        if: inputs.dry_run != 'true'
         uses: softprops/action-gh-release@v1
         with:
           repository: ${{ inputs.repo_url }}
@@ -162,7 +162,7 @@ jobs:
         run: echo "Release promotion complete → version ${{ steps.promote.outputs.release_version }}"
 
       - name: Dry-run summary
-        if: inputs.dry_run == true
+        if: inputs.dry_run == 'true'
         run: |
           echo "[DRY-RUN] Workflow completed successfully"
           echo "[DRY-RUN] No changes were pushed to the remote repository"
